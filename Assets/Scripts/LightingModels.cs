@@ -29,7 +29,7 @@ namespace Arielado.Lighting.Models {
         [Range(0.001f, 0.995f)] public float rayleighDensityFalloff;
         [Range(0.001f, 0.995f)] public float mieDensityFalloff;
         public float planetRadius;
-        [SerializeField, Min(0)] private float atmosphereThickness;
+        [SerializeField, Range(1, 300)] private float atmosphereThickness;
 
         public Vector3 RayleighScatteringBase => (Vector4)rayleighScatteringBase * rayleighScatteringCoefficient;
         public Vector3 AtmosphereAbsorptionBase => (Vector4)atmosphereAbsorptionBase * atmosphereAbsorptionCoefficient;

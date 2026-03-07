@@ -1,3 +1,7 @@
+// Most of the code here I took from this implementation in shader toy:
+// https://www.shadertoy.com/view/slSXRW#
+// Thanks Andrew Helmer!
+
 #pragma kernel GetSunTransmittanceLUT
 #pragma kernel GetMultScatTransmittanceLUT _MS_KERNEL
 #pragma kernel GetSkyViewLUT _SKY_VIEW_KERNEL

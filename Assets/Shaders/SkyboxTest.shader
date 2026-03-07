@@ -31,7 +31,8 @@ Shader "Arielado/SkyboxTest" {
 
                 UNITY_VERTEX_OUTPUT_STEREO
             };
-
+            
+            // https://www.shadertoy.com/view/slSXRW# - Andrew Helmer
             float2 getValFromSkyLUTCoords(float3 rayDir) {
                 float3 ground = float3(0, _PLANET_RADIUS+_GROUND_EPSILON, 0);
                 float3 camPos = GetCameraPositionWS()*_VIEW_POSITION_SCALE;
@@ -43,8 +44,9 @@ Shader "Arielado/SkyboxTest" {
                 //float horizonAngle = safeacos(sqrt(height * height - _PLANET_RADIUS * _PLANET_RADIUS) / height);
                 float horizonAngle = acos(sqrt(height * height - _PLANET_RADIUS * _PLANET_RADIUS) / height);
                 float altitudeAngle = horizonAngle - acos(dot(rayDir, up)); // Between -PI/2 and PI/2
-                float azimuthAngle; // Between 0 and 2*PI 
-            
+                float azimuthAngle; 
+                
+                // Should actually get a right and forward based on the sun direction, but this works here.
                 float3 right = float3(1, 0, 0);
                 float3 forward = float3(0, 0, -1);
                 
