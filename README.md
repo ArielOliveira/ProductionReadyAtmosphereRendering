@@ -1,7 +1,7 @@
 # Production Ready Atmosphere Rendering
 This implements Unreal Engine's skybox in Unity from Sébastien Hillaire's paper.
 
-<img src="./Demo/demo0.gif" alt="Description of GIF" width="350" height="180" /> <img src="./Demo/demo1.gif" alt="Description of GIF" width="350" height="180" />
+<img src="./Demo/demo0.gif" width="350" height="180" /> <img src="./Demo/demo1.gif" width="350" height="180" />
 
 ## Setup
 - Unity version: 6000.3.8f1
