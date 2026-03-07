@@ -24,6 +24,6 @@ MonoBehaviour:
     mieAbsorptionCoefficient: 0.0002
     atmosphereAbsorptionCoefficient: 0.003
     rayleighDensityFalloff: 0.209
-    mieDensityFalloff: 0.733
+    mieDensityFalloff: 0.229
     planetRadius: 6360
-    atmosphereThickness: 65
+    atmosphereThickness: 60

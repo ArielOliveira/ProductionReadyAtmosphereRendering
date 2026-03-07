@@ -11,7 +11,7 @@ This implements Unreal Engine's skybox in Unity from Sébastien Hillaire's paper
 
 ## Missing Features and Issues
 - This does not implement the aerial view LUT. 
-- Going too far off the planet causes rendering issues. This can be fixed by adjusting the raycast to account for the camera being outside the planet. 
+- Going off the planet's atmosphere radius breaks the rendering. This can be fixed by adjusting the raymarching to account for the camera being outside the planet. 
 - Only considers one light source.
 - Tone mapping and gamma correction is being done before the LUT gets upscaled. This helped a bit
 in performance, but doing it at the fragment shader should yield better visuals. 
