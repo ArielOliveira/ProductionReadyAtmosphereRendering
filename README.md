@@ -14,7 +14,7 @@ This implements Unreal Engine's skybox in Unity from Sébastien Hillaire's paper
 - Going off the planet's atmosphere radius breaks the rendering. This can be fixed by adjusting the raymarching to account for the camera being outside the planet. 
 - Only considers one light source.
 - Tone mapping and gamma correction is being done before the LUT gets upscaled. This helped a bit
-in performance, but doing it at the fragment shader should yield better visuals. 
+in performance, but doing it at the fragment stage should yield better visuals. 
 
 ## References
 - https://sebh.github.io/publications/egsr2020.pdf
