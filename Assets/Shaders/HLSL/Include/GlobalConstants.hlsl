@@ -1,0 +1,7 @@
+#ifndef GLOBAL_CONSTANTS
+#define GLOBAL_CONSTANTS
+
+#define _GROUND_EPSILON 0.001
+#define _VIEW_POSITION_SCALE 0.05
+
+#endif

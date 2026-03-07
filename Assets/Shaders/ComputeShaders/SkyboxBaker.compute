@@ -1,0 +1,293 @@
+#pragma kernel GetSunTransmittanceLUT
+#pragma kernel GetMultScatTransmittanceLUT _MS_KERNEL
+#pragma kernel GetSkyViewLUT _SKY_VIEW_KERNEL
+
+#include "Assets/Shaders/HLSL/Include/GlobalConstants.hlsl"
+#include "Assets/Shaders/HLSL/Include/Lighting/AtmosphereFunctions.hlsl"
+#include "Assets/Shaders/HLSL/Include/Lighting/AtmosphereInputs.hlsl"
+
+#if (!_SKY_VIEW_KERNEL && !_MS_KERNEL)
+    RWTexture2D<float4> _SunTransmittanceLUT;
+#else
+    Texture2D<float4> _SunTransmittanceLUT;
+    SamplerState lutLinearClamp;
+#endif
+
+#if _SKY_VIEW_KERNEL
+    Texture2D<float4> _MultiScatteringLUT;
+    RWTexture2D<float4> _SkyViewLUT;
+
+    uniform float4 _ViewPos;
+    uniform float4 _SunDir;
+#elif _MS_KERNEL
+    RWTexture2D<float4> _MultiScatteringLUT;
+#endif
+
+void getScatteringValues(float height, 
+                         out float3 rayleighScattering, 
+                         out float mieScattering,
+                         out float3 extinction) {
+    float heightAboveSurface = (height - _PlanetRadius);
+
+    float rayleighDensity = exp2(-heightAboveSurface * _RayleighDensityFalloff);
+    float mieDensity = exp2(-heightAboveSurface * _MieDensityFalloff);
+                
+    rayleighScattering = _RayleighScatteringBase.rgb * rayleighDensity;
+    
+    float3 atmosphereAbsorption = _AtmosphereAbsorptionBase.rgb*max(0.0, 1.0 - abs(heightAboveSurface-_AtmosphereAbsorptionRange.x)/_AtmosphereAbsorptionRange.y);
+
+    mieScattering = _MieScatteringBase * mieDensity;
+    float mieAbsorption = _MieAbsorptionBase * mieDensity;
+    
+    extinction = rayleighScattering + mieScattering + mieAbsorption + atmosphereAbsorption;
+}
+
+float2 getLUTCoords(float3 sunDir, float3 up, float height, float2 res) {
+    float sunCosZenithAngle = dot(sunDir, up);
+    
+    // This actually fixed a lot of banding as well. <- Not needed anymore, the whole problem was
+    // the lack of linear filtering.    
+    //sunCosZenithAngle = 0.5+0.5*sign(sunCosZenithAngle)*sqrt(abs(sunCosZenithAngle));
+    sunCosZenithAngle = 0.5+0.5*sunCosZenithAngle;
+    
+    float2 uv = float2((res.x-1)*sunCosZenithAngle,
+                       (res.y-1)*max(0, min(1, (height - _PlanetRadius)/(_AtmosphereRadius - _PlanetRadius))));
+    
+    return float2(uv.x, uv.y);
+}
+
+#if _SKY_VIEW_KERNEL
+    float3 getSkyViewScattering(float3 pos, float3 rayDir, float3 sunDir, float tMax) {
+        float cosTheta = dot(rayDir, sunDir);
+
+        float miePhase = getMiePhase(cosTheta);
+        float rayleighPhase = getRayleighPhase(-cosTheta);
+
+        float3 lum = 0;
+        float3 transmittance = 1;
+        float3 currentPos = pos;
+
+        float stepSize = tMax / float(_RuntimeDepthSamples);
+        
+        for (float i = 0; i <= float(_RuntimeDepthSamples); i += 1.0) {
+            float height = length(currentPos);
+            float3 up = currentPos / height;
+
+            float3 extinction, rayleighScattering;
+            float mieScattering;
+                        
+            getScatteringValues(height, rayleighScattering, mieScattering, extinction);
+            
+            float3 sampleTransmittance = exp2(-stepSize * extinction);
+
+            float2 uv0 = getLUTCoords(sunDir, up, height, 2);
+            float2 uv1 = getLUTCoords(sunDir, up, height, 2);
+
+            float3 sunTransmittance = _SunTransmittanceLUT.SampleLevel(lutLinearClamp, uv0, 0).rgb;
+            float3 ms = _MultiScatteringLUT.SampleLevel(lutLinearClamp, uv1, 0).rgb;
+
+            float3 rayleighInScattering = rayleighScattering*(rayleighPhase*sunTransmittance + ms);
+            float3 mieInScattering = mieScattering*(miePhase*sunTransmittance + ms);
+                                
+            float3 inScattering = (rayleighInScattering + mieInScattering) * _SunDir.w;
+            float3 scatteringIntegral = (inScattering - inScattering * sampleTransmittance) / extinction;
+
+            lum += scatteringIntegral*transmittance;
+            transmittance *= sampleTransmittance;
+
+            currentPos += stepSize*rayDir;
+        }
+
+        return lum;
+    }
+
+    [numthreads(32, 32, 1)]
+    void GetSkyViewLUT(uint3 id : SV_DispatchThreadID) {
+        float2 groupSize = float2(_SkyViewLUTRes);
+        
+        float2 uv = float2(float2(id.xy) / groupSize);
+
+        float azimuthAngle = (uv.x - 0.5) * 2 * -PI;
+        float altitude = (uv.y * 2) - 1;
+
+        // Quadratic curve to concentrate more texels on the horizon
+        float adjV = altitude*sign(altitude)*altitude;
+
+        float3 ground = float3(0, _PlanetRadius+_GROUND_EPSILON, 0);
+        float3 viewPos = ground + (_ViewPos.xyz*_VIEW_POSITION_SCALE);
+        
+        float height = length(viewPos);
+        float horizonAngle = safeacos(sqrt(height * height - _PlanetRadius * _PlanetRadius) / height) - 0.5 * PI;
+        float altitudeAngle = (adjV*0.5*PI) - horizonAngle;
+
+        float3 rayDir = rotateAboutAxisDegrees(float3(0, 0, -1), float3(1, 0, 0), altitudeAngle * RAD_2_DEG);
+        rayDir = rotateAboutAxisDegrees(rayDir, float3(0, 1, 0), azimuthAngle * RAD_2_DEG);
+        
+        float atmoDist = rayIntersectSphere(viewPos, rayDir, _AtmosphereRadius);
+        float groundDist = rayIntersectSphere(viewPos, rayDir, _PlanetRadius);
+        float tMax = (groundDist < 0.0) ? atmoDist : groundDist;
+
+        float3 lum = getSkyViewScattering(viewPos, rayDir, _SunDir.rgb, tMax);
+        
+        // Gamma correction and tone-mapping before upscaling?
+        lum           = ACESFilm(lum);
+        lum          *= 0.333;
+        lum           = pow(lum, 0.5);
+        
+        _SkyViewLUT[id.xy] = float4(lum, 1);
+    }
+#elif _MS_KERNEL
+    float3 getMultScattTransmittance(float3 pos, float3 sunDir) {
+        float3 lumTotal = 0;
+        float3 fms = 0;
+
+        float invSamples = 1.0 / float(_HemisphereSamples*_HemisphereSamples);
+
+        for (int i = 0; i <= _HemisphereSamples; i++) {
+            for (int j = 0; j <= _HemisphereSamples; j++) {
+                float theta = PI * (float(i) + 0.5) / float(_HemisphereSamples);
+                float phi = safeacos(1.0 - 2.0 * (float(j) + 0.5) / float(_HemisphereSamples));
+                
+                float3 rayDir = getSphericalDir(theta, phi);
+
+                float atmosDist = rayIntersectSphere(pos, rayDir, _AtmosphereRadius);
+                float groundDist = rayIntersectSphere(pos, rayDir, _PlanetRadius);
+                float tMax = atmosDist;
+
+                if (groundDist > 0) tMax = groundDist;
+
+                float cosTheta = dot(rayDir, sunDir);
+
+                float miePhase = getMiePhase(cosTheta);
+                float rayleighPhase = getRayleighPhase(-cosTheta);
+
+                float3 lum = 0; 
+                float3 lumFactor = 0; 
+                float3 transmittance = 1;
+
+                float3 currentPos = pos;
+                float stepSize = tMax / float(_OfflineDepthSamples);
+
+                for (float stepI = 0; stepI < float(_OfflineDepthSamples); stepI += 1.0) {                 
+                    float3 extinction, rayleighScattering;
+                    float mieScattering;
+
+                    float height = length(currentPos);
+                    float3 up = currentPos / height;
+                        
+                    getScatteringValues(height, rayleighScattering, mieScattering, extinction);
+
+                    float3 sampleTransmittance = exp2(-stepSize * extinction);
+                                
+                    float3 scatteringNoPhase = rayleighScattering + mieScattering;
+                    float3 scatteringF = (scatteringNoPhase - scatteringNoPhase * sampleTransmittance) / extinction;
+
+                    float2 uv = getLUTCoords(sunDir, up, height, 2);
+
+                    float3 sunTransmittance = _SunTransmittanceLUT.SampleLevel(lutLinearClamp, uv, 0).rgb; //Sample(_SunTransmittanceLUT, uv).rgb; 
+                    
+                    float3 rayleighInScattering = rayleighScattering*rayleighPhase;
+                    float3 mieInScattering = mieScattering*miePhase;
+                                
+                    float3 inScattering = (rayleighInScattering + mieInScattering) * sunTransmittance;
+                    float3 scatteringIntegral = (inScattering - inScattering * sampleTransmittance) / extinction;
+                                    
+                    lumFactor += transmittance*scatteringF;
+                    lum += scatteringIntegral*transmittance;
+                    transmittance *= sampleTransmittance;
+
+                    currentPos += stepSize*rayDir;
+                }
+
+                if (groundDist > 0) {
+                    float3 hitPos = pos + groundDist*rayDir;
+                    //if (dot(pos, sunDir) > 0) {                    
+                        float height = length(hitPos);
+                        float3 up = hitPos / height;
+                    
+                        float3 sunZenith = pos / length(pos);
+                        float groundFactor = saturate(dot(sunZenith, sunDir));
+
+                        hitPos = normalize(hitPos)*(_PlanetRadius+_GROUND_EPSILON);
+                        float2 uv = getLUTCoords(sunDir, up, height, float2(_SunTLUTRes));
+                        lum += transmittance*_SunTransmittanceLUT.SampleLevel(lutLinearClamp, uv, 0).rgb*_GroundAlbedo.rgb*groundFactor;
+                    //}
+                }
+
+                fms += lumFactor*invSamples;
+                lumTotal += lum*invSamples;
+            }
+        }
+        
+        return lumTotal / (1 - fms);
+    }
+
+    [numthreads(16, 16, 1)]
+    void GetMultScatTransmittanceLUT(uint3 id : SV_DispatchThreadID) {
+        float2 groupSize = float2(_MSLUTRes);
+
+        float2 uv = (float2(id.xy) / groupSize);
+
+        float sunCosTheta = 2*uv.x-1;
+        //sunCosTheta = sunCosTheta*sign(sunCosTheta)*sunCosTheta;
+
+        float sunTheta = safeacos(sunCosTheta);
+        
+        float height = lerp(_PlanetRadius+_GROUND_EPSILON, _AtmosphereRadius, uv.y);
+        
+        float3 pos = float3(0, height, 0);
+        float3 sunDir = normalize(float3(0, sunCosTheta, -sin(sunTheta)));
+
+        float3 ms = getMultScattTransmittance(pos, sunDir);
+
+        _MultiScatteringLUT[id.xy] = float4(ms, 1);
+    }
+#else
+    float3 getSunTransmittance(float3 pos, float3 sunDir, int steps) {
+        if (rayIntersectSphere(pos, sunDir, _PlanetRadius) > 0) return 0;
+                    
+        float atmoDist = rayIntersectSphere(pos, sunDir, _AtmosphereRadius);
+        float3 intersectPoint = pos + sunDir*atmoDist;
+                    
+        float stepSize = atmoDist / float(steps);
+        float3 currentPos = pos;
+        
+        float3 sunTransmittance = 1;
+
+        for (float i = 0; i <= float(steps); i += 1.0) {        
+            float3 extinction;
+            float3 rayLeighScattering;
+            float mieScattering;
+
+            float height = length(currentPos);
+                        
+            getScatteringValues(height, rayLeighScattering, mieScattering, extinction);
+            sunTransmittance *= exp2(-stepSize * extinction);
+
+            currentPos += stepSize*sunDir;
+        }
+
+        return sunTransmittance;
+    }
+
+    [numthreads(16, 16, 1)]
+    void GetSunTransmittanceLUT(uint3 id : SV_DispatchThreadID) {
+        float2 groupSize = float2(_SunTLUTRes);
+
+        float2 uv = saturate(float2(id.xy) / groupSize);
+
+        float sunCosTheta = 2 * uv.x - 1;
+        //sunCosTheta = sunCosTheta*sign(sunCosTheta)*sunCosTheta;
+
+        float sunTheta = safeacos(sunCosTheta);
+        float height = lerp(_PlanetRadius+_GROUND_EPSILON, _AtmosphereRadius, uv.y);
+        float heightAboveSurface = height - _PlanetRadius;
+        
+        float3 pos = float3(0, height, 0);
+        float3 sunDir = normalize(float3(0, sunCosTheta, -sin(sunTheta)));
+        
+        float3 sunTransmittance = getSunTransmittance(pos, sunDir, _OfflineDepthSamples);
+
+        _SunTransmittanceLUT[id.xy] = float4(sunTransmittance, 1);
+    }
+#endif
