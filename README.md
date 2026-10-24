@@ -10,7 +10,7 @@ This implements Unreal Engine's skybox in Unity from Sébastien Hillaire's paper
 ## How to use
 - The sample scene is already set so that the background is rendered using this method. No need to hit play.
 - The main script is called AtmosphereRenderer.cs, there is a game object with the same name in the demo running it. It receives a scriptable object containing the parameters for the atmosphere. 
-- Works like Unity's default skybox: Updates automatically when attaching or changing an attached AtmosphereParameters scriptable object.
+- Updates automatically when attaching or changing an attached AtmosphereParameters scriptable object.
 - You can create new parameters by right clicking the project window and going Create -> Data -> Lighting -> AtmosphereParameters.
 
 ## Missing Features and Issues
