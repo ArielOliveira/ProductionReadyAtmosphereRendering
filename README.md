@@ -23,4 +23,4 @@ in performance, but doing it at the fragment stage should yield better visuals.
 ## References
 - https://sebh.github.io/publications/egsr2020.pdf
 - https://www.shadertoy.com/view/slSXRW# <- Consulted a lot of Andrew Helmer's code.
-- https://www.shadertoy.com/view/fd2fWc# <- Potential fix for Aerial view.
+- https://www.shadertoy.com/view/fd2fWc# <- Example of Aerial view implementation.
